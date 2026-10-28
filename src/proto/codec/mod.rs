@@ -1003,6 +1003,21 @@ mod tests {
     }
 
     #[test]
+    fn changing_compression_level_takes_effect() {
+        let packet = payload(4096, 4);
+        let mut codec = PacketCodec::default();
+        codec.compress(Compression::none());
+        codec.compress(Compression::default());
+        let mut wire = BytesMut::new();
+        codec.encode(&mut &*packet, &mut wire).unwrap();
+        assert_eq!(
+            LittleEndian::read_u24(&wire[4..]) as usize,
+            packet.len() + 4
+        );
+        assert!(wire.len() < packet.len());
+    }
+
+    #[test]
     fn rejects_packet_that_inflates_to_another_length() {
         let mut plain = BytesMut::new();
         plain.put_uint_le(1000, 3);
