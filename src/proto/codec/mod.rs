@@ -329,6 +329,25 @@ impl CompData {
             CompData::Compressed(needed, _) | CompData::Uncompressed(needed) => needed.get(),
         }
     }
+
+    /// Writes the plain data of `payload` into `dst`, inflating it with `inflater` if compressed.
+    fn write_payload(
+        self,
+        payload: &[u8],
+        dst: &mut BytesMut,
+        inflater: &mut Option<Decompress>,
+    ) -> io::Result<()> {
+        match self {
+            CompData::Uncompressed(_) => {
+                dst.extend_from_slice(payload);
+                Ok(())
+            }
+            CompData::Compressed(_, plain_len) => {
+                let inflater = inflater.get_or_insert_with(|| Decompress::new(true));
+                inflate_into(inflater, payload, plain_len.get(), dst)
+            }
+        }
+    }
 }
 
 /// Decoder for MySql compressed packet.
@@ -391,15 +410,7 @@ impl CompDecoder {
             CompDecoder::Packet { seq_id, needed } => {
                 if src.len() >= 7 + needed.needed() {
                     src.advance(7);
-                    match needed {
-                        CompData::Uncompressed(needed) => {
-                            dst.extend_from_slice(&src[..needed.get()]);
-                        }
-                        CompData::Compressed(needed, plain_len) => {
-                            let inflater = inflater.get_or_insert_with(|| Decompress::new(true));
-                            inflate_into(inflater, &src[..needed.get()], plain_len.get(), dst)?;
-                        }
-                    }
+                    needed.write_payload(&src[..needed.needed()], dst, inflater)?;
                     src.advance(needed.needed());
                     *self = CompDecoder::Idle;
                     Ok(Some(ChunkInfo::Last(seq_id)))
