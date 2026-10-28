@@ -895,7 +895,7 @@ mod tests {
         (0..len)
             .map(|i| {
                 if i % 64 < 48 {
-                    b"SELECT id, status FROM bet WHERE id = 1"[i % 39]
+                    b"SELECT id, name FROM users WHERE id = 1"[i % 39]
                 } else {
                     state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
                     (state >> 56) as u8
@@ -914,6 +914,28 @@ mod tests {
                 state as u8
             })
             .collect()
+    }
+
+    fn deflates_to_its_own_length(len: usize) -> Vec<u8> {
+        (0..len)
+            .map(|text_len| {
+                let mut packet: Vec<u8> = b"SELECT id, name FROM users WHERE id = 1"
+                    .iter()
+                    .cycle()
+                    .take(text_len)
+                    .copied()
+                    .collect();
+                packet.extend(incompressible(len - text_len));
+                packet
+            })
+            .find(|packet| {
+                let mut deflated = Vec::with_capacity(len + 64);
+                Compress::new(Compression::default(), true)
+                    .compress_vec(packet, &mut deflated, FlushCompress::Finish)
+                    .unwrap();
+                deflated.len() == len
+            })
+            .unwrap()
     }
 
     fn compressed_packet(seq_id: u8, plain_len: usize, plain: &[u8]) -> BytesMut {
@@ -972,6 +994,7 @@ mod tests {
         for packet in [
             payload(MIN_COMPRESS_LENGTH - 5, 1),
             incompressible(MIN_COMPRESS_LENGTH * 4),
+            deflates_to_its_own_length(MIN_COMPRESS_LENGTH * 2),
         ] {
             let mut src = BytesMut::from(&packet[..]);
             let mut wire = BytesMut::new();
